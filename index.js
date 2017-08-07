@@ -34,11 +34,6 @@ class ServerlessS3Local {
                 shortcut: 'c',
                 usage: 'Enable CORS',
               },
-              noStart: {
-                shortcut: 'n',
-                default: false,
-                usage: 'Do not start S3 local (in case it is already running)',
-              },
             },
           },
         },
@@ -56,7 +51,7 @@ class ServerlessS3Local {
   startHandler() {
     return new Promise((resolve, reject) => {
       const config = (this.serverless.service.custom && this.serverless.service.custom.s3) || {};
-      const options = Object.assign({}, this.options, config);
+      const options = Object.assign({buckets : []}, this.options, config);
 
       // Mix buckets from resources list and buckets from parameters
       const buckets = this.buckets().concat(options.buckets) || [];
@@ -65,11 +60,6 @@ class ServerlessS3Local {
       const silent = false;
       const cors = options.cors || false;
 
-      if (options.noStart) {
-        ServerlessS3Local.createBuckets(port, buckets);
-        resolve();
-        return;
-      }
       const dirPath = options.directory || './buckets';
       fs.ensureDirSync(dirPath); // Create destination directory if not exist
       const directory = fs.realpathSync(dirPath);
@@ -82,33 +72,34 @@ class ServerlessS3Local {
         cors,
       }).run((err, s3Host, s3Port) => {
         if (err) {
-          console.error('Error occured while starting S3 local.');
-          reject(err);
-          return;
+          console.error('Failed to launch S3 local.');
+          s3Host = hostname;
+          s3Port = port;
+        }
+        else {
+          console.log(`S3 local started ( port:${s3Port} )`);
         }
 
-        console.log(`S3 local started ( port:${s3Port} )`);
-
-        ServerlessS3Local.createBuckets(s3Port, buckets);
+        ServerlessS3Local.createBuckets(s3Host, s3Port, buckets);
         resolve();
       });
     });
   }
 
   endHandler() {
-    if (!this.options.noStart) {
-      this.client.close();
-      console.log('S3 local closed');
-    }
+    this.client.close();
+    console.log('S3 local closed');
   }
 
-  static createBuckets(port, buckets) {
+  static createBuckets(host, port, buckets) {
     const s3Client = new AWS.S3({
       s3ForcePathStyle: true,
-      endpoint: new AWS.Endpoint(`http://localhost:${port}`),
+      endpoint: new AWS.Endpoint(`http://${host}:${port}`),
     });
     buckets.forEach((bucket) => {
-      s3Client.createBucket({ Bucket: bucket }, () => {});
+      s3Client.createBucket({ Bucket: bucket }, (err, data) => {
+        if (!err) console.log(`Created new bucket ${data.Location} successfully`);
+      });
     });
   }
 
